@@ -344,8 +344,8 @@ for t=1:settings.numFrames
     resultImageRaw = PerformPostProcessing(resultImageRaw, settings);
             
     %% write the final result images
-    imwrite(uint8(resultImage), sprintf('%s/man_track%03d.png', settings.outputFolderLabel, t));
-    imwrite(resultImageRaw, sprintf('%s/t%03d.png', settings.outputFolderRaw, t));
+    imwrite(uint16(resultImage), sprintf('%s/man_track%03d.tif', settings.outputFolderLabel, t-1));
+    imwrite(uint16(65535*double(resultImageRaw)/255), sprintf('%s/t%03d.tif', settings.outputFolderRaw, t-1));
     
     disp(['Finished writing result images ' num2str(t) ' / ' num2str(settings.numFrames)]);
 end

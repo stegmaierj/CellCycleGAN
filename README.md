@@ -24,7 +24,7 @@ Spatiotemporal Microscopy Image Synthesis of Cell Populations using Statistical 
 - Note that the script sets the seed for the random generator right in the beginning of the script (`settings.randomSeed`). Make sure to change this seed if you want to generate a different image sequence.
 - Results are stored in the Cell Tracking Challenge format (http://celltrackingchallenge.net/) and should thus be usable with the performance evaluation tools of the challenge.
 
-<img src="Data/Screenshots/Screenshot.png" width="100%">
+<center><img src="Data/Screenshots/01_Compressed.gif" width="70%"></center>
 
 ## Citation
 If you find this work useful, please cite the following publication: 

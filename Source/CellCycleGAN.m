@@ -28,9 +28,11 @@
 %
 %%
 
+for i=1:5
+
 %% set random seed to get reproducible results
 clear settings;
-settings.randomSeed = 1; %% change the random number generator initialization to generate a set of different images
+settings.randomSeed = i; %% change the random number generator initialization to generate a set of different images
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% input and output directories
@@ -62,7 +64,7 @@ settings.numSamplingPoints = 60;                        %% number of sampling po
 settings.numFrames = 50;                                %% number of frames to be simulated. Note that a large number combined with a small image size may result in very crowded scenes
 settings.borderPadding = 100;                           %% safety border that should not be occupied by cells. If simulation is too long, cells may move towards the boundary and are stuck at this padding border
 settings.debugFigures = false;                          %% if enabled a few debug figures are visualized
-settings.numRefinementSteps = 1;                        %% regularization for the initial cell positions. Higher numbers yield very homogeneously distributed cells
+settings.numRefinementSteps = 2;                        %% regularization for the initial cell positions. Higher numbers yield very homogeneously distributed cells
 settings.patchSize = 96;                                %% image patch size used for generation and training. Note that the number should be often divisible by 2, due to the downsampling performed by the GAN
 
 settings.randomMotionMultiplier = 2.0;                  %% random displacements applied relative to the predecessor sampled from N(0,1) and multiplied with the selected randomMotionMultiplier
@@ -133,3 +135,5 @@ system(['python ' settings.sourceDir 'CellCycleGAN.py --input_path ' settings.ou
 rng(settings.randomSeed);
 settings.saveResultImages = true;
 PerformMaskGeneration;
+
+end
