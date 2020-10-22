@@ -159,5 +159,5 @@ dependencies:
     - wurlitzer==2.0.0
     - yapf==0.29.0
     - zipp==1.0.0
-prefix: /home/temp/eschweiler/miniconda3/envs/pytorch
+prefix: /home/miniconda3/envs/pytorch
 

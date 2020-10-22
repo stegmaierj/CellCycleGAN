@@ -36,13 +36,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 import pytorch_lightning as pl
-
 from argparse import ArgumentParser
 from collections import OrderedDict
 from torch.utils.data import DataLoader
 from CellCycleGANDataLoader import CCGH5DataLoader
 
-
+# specify the generator network
 class Generator(nn.Module):
     
     def __init__(self, patch_size, in_channels, out_channels, feat_channels=32):
@@ -164,8 +163,6 @@ class Generator(nn.Module):
             nn.Sigmoid()
             )
 
-        
-
     def forward(self, mask):
         
         c1 = self.c1(mask)
@@ -216,9 +213,8 @@ class Generator(nn.Module):
         
         return out1, out2
         
-        
 
-
+# specify the discriminator network        
 class Discriminator(nn.Module):
     
     def __init__(self, patch_size, in_channels):
@@ -279,8 +275,7 @@ class Discriminator(nn.Module):
         return out
 
 
-
-
+# Define the lightning module for the GAN
 class GAN2D(pl.LightningModule):
 
     def __init__(self, hparams):
@@ -307,12 +302,10 @@ class GAN2D(pl.LightningModule):
         
         # Get image ans mask of current batch
         imgs, masks = batch['raw_image'], batch['target_image']
-        
         current_batch_size = imgs.shape[0]
 
         # train generator
         if optimizer_idx == 0:
-            
             self.last_imgs = imgs
             self.last_masks = masks
 
@@ -393,7 +386,6 @@ class GAN2D(pl.LightningModule):
 
             fake_images = torch.cat((self.generated_imgs.detach(), self.last_masks[:,0:2,:,:]), axis=1)
             fake_loss = self.adversarial_loss(self.discriminator(fake_images), fake)
-            #fake_loss = self.adversarial_loss(self.discriminator(self.generated_imgs.detach()), fake)
 
             # discriminator loss is the average of these
             d_loss = (real_loss + fake_loss) / 2
@@ -439,27 +431,6 @@ class GAN2D(pl.LightningModule):
 
     def on_epoch_end(self):
         return
-        """
-        z = self.last_masks
-
-        # match gpu device (or keep as cpu)
-        if self.on_gpu:
-            z = z.cuda(self.last_imgs.device.index)
-
-        # log sampled images
-        sample_imgs, sample_imgs2 = self.forward(z)
-        sample_imgs = 255*sample_imgs[:,0,:,:]
-        sample_imgs = sample_imgs.type(torch.uint8)
-        grid = torchvision.utils.make_grid(sample_imgs)
-
-        grid = torch.zeros(sample_imgs.shape[0]*sample_imgs.shape[1], sample_imgs.shape[1], dtype=torch.uint8)
-        for i in range(0,sample_imgs.shape[0]):
-            current_range = range((i*sample_imgs.shape[1]), ((i+1)*sample_imgs.shape[1]))
-            grid[current_range,:] = sample_imgs[i,:,:].cpu()
-
-        self.logger.experiment.add_image('generated_images', grid, self.current_epoch, dataformats="HW")
-        """
-        
         
     @staticmethod
     def add_model_specific_args(parent_parser):  # pragma: no cover

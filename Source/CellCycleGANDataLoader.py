@@ -15,33 +15,19 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 from skimage import data, io, filters, util
 
-# class for loading optical flow *.h5 files.
+# class for loading *.h5 files.
 # expects the *.h5 files to contain the following data sets:
-# raw_image: original image pair containing the previous and the current time point.
-#            Dimension for 2D are: 2 x 1 x H x W, and for 3D: 2 x D x H x W .
-# target_image: target values for the current time point with 5 channels (0-2: flowX, flowY, flowZ; 3: seeds, 4: segmentation)
-#               Dimensions of the target image for 2D are 5 x 1 x H x W and for 3D: 5 x D x H x W.
-# manual_stages: binary image with zeros for parts of the image to ignore and ones for regions with available ground truth. 
-#             Dimensions are 1 x H x W and D x H x W for 2D and 3D, respectively.
+# raw_image: 3D image with the dimensions D x H x W. Expects an intensity image with 8 bit intensity range.
+# target_image: 3D image with the dimensions D x H x W. Should be a binary image with 0 as background and 1 as foreground value.
+# manual_stages: vector of the same length as the number of frames. Expects an integer >0 to encode the stages.
 class CCGH5DataLoader(Dataset):
-    """Semantic segmentation dataset."""
 
-    def __init__(self, image_dirs, input_filter='', patch_size=(1, 96, 96), transforms=None, random_subset=1.0, inference_mode=False, normalization_mode='none'):
-        """
-        Args:
-            image_dir (string): Path to h5 files containing the fields raw_image, target_image, centroids and dont_cares.
-            transform (dict, optional): Optional transforms to be applied on a sample. Only a limited amount of transforms is available currently, 
-                                        as it's not trivial to apply arbitary transformations to the flow fields.
-            TODO: inference_mode (boolean): loads the entire image and returns a tiled representation of the image that can be processed separately
-            normalization_mode (int): none: no normalization, max: divide by maximum intensity, zero_one: scale [min, max] to [0, 1], zscore: scale to zero mean, unit std. dev., data_range: 8/16 bit range -> [0,1]
-            use_centroid_sampling: uses the centroids dict entry of the H5 files to sample regions of the desired size that contain a randomly selecte nucleus at a random location in the image patch
-        """
+    def __init__(self, image_dirs, input_filter='', patch_size=(1, 96, 96), transforms=None, random_subset=1.0, normalization_mode='none'):
 
         # specify the image dirs and the transforms to be used.
         self.image_dirs = image_dirs
         self.transforms = transforms
         self.random_subset = random_subset
-        self.inference_mode = inference_mode
         self.normalization_mode = normalization_mode
 
         if (transforms is not None):
@@ -106,40 +92,6 @@ class CCGH5DataLoader(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-
-        # if in inference mode, simply load two sequential tif files and append them as the raw image
-        if (self.inference_mode == True):
-
-            # get the current file extension
-            _, extension = os.path.splitext(self.image_files[idx])
-            extension = extension.lower()
-
-            print('Trying to load file ' + self.image_files[idx])
-
-            # call appropriate loader depending on the file format
-            if extension.find('.tif') > -1:
-                raw_image = io.imread(self.image_files[idx])
-
-                # convert rgb to gray if three channels are present
-                if (len(raw_image.shape) > 2):
-                    raw_image = np.mean(raw_image, -1)
-
-            elif extension.find('.h5') > -1:
-                f_handle = h5py.File(self.image_files[idx], 'r')
-                raw_image = f_handle['raw_image']
-                raw_image = raw_image[:]
-            else:
-                print('Unrecognized file format. Supported formats are tiff and hdf5.')
-
-            # convert image to zero mean, unit standard deviation.
-            raw_image = raw_image.astype(np.float32)
-            raw_image = self.normalize_intensity(raw_image, self.normalization_mode)
-            target_image = None
-            dont_cares = None
-
-            # compose and return the current sample
-            sample = {'raw_image': raw_image, 'target_image': target_image, 'dont_cares': dont_cares}
-            return sample
 
         # open the file handle and handles to the images
         f_handle = h5py.File(self.image_files[idx], 'r')
