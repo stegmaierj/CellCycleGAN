@@ -1,3 +1,33 @@
+%%
+% CellCycleGAN.
+% Copyright (C) 2020 D. Bähr, D. Eschweiler, A. Bhattacharyya, 
+% D. Moreno-Andrés, W. Antonin, J. Stegmaier
+%
+% Licensed under the Apache License, Version 2.0 (the "License");
+% you may not use this file except in compliance with the License.
+% You may obtain a copy of the Liceense at
+% 
+%     http://www.apache.org/licenses/LICENSE-2.0
+% 
+% Unless required by applicable law or agreed to in writing, software
+% distributed under the License is distributed on an "AS IS" BASIS,
+% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+% See the License for the specific language governing permissions and
+% limitations under the License.
+%
+% Please refer to the documentation for more information about the software
+% as well as for installation instructions.
+%
+% If you use this application for your work, please cite the repository and one
+% of the following publications:
+%
+% D. Bähr, D. Eschweiler, A. Bhattacharyya, D. Moreno-Andrés, W. Antonin, J. Stegmaier, 
+% "CellCycleGAN: Spatiotemporal Microscopy Image Synthesis of Cell
+% Populations using Statistical Shape Models and Conditional GANs", arxiv,
+% 2020.
+%
+%%
+ 
 %% initialize the objects in the first frame
 clear objects;
 objects = struct();
@@ -5,7 +35,9 @@ for i=1:settings.numObjects
     objects(i,1).id = i;
     objects(i,1).stages = randperm(settings.numStages,1);
     objects(i,1).rotation = rand * 360;
+    objects(i,1).intensityStdDev = randn * settings.stdIntensities(objects(i,1).stages);
     objects(i,1).predecessor = -1;
+    objects(i,1).rawImage = [];
 end
 
 %% specify the next object id, that is used when introducing daughter cells
@@ -51,13 +83,14 @@ for t=2:settings.numFrames
             %% simply add object to current frame without division
             objects(o,t) = prevObject;
             objects(o,t).stages = [objects(o,t).stages, nextStage];
-            objects(o,t).rotation = mod(prevObject.rotation + randn, 360);
+            objects(o,t).rotation = mod(prevObject.rotation + settings.rotationAngleMultiplier * randn, 360);
             objects(o,t).predecessor = -1;
         end
     end
 end
 
 %% perform interpolation between the different stage models
+currentOutIndex = 1;
 for o=1:size(objects,1)
 
     %% find the temporal extent of the current object
@@ -86,14 +119,14 @@ for o=1:size(objects,1)
     numShapeModels = length(stageChanges);
 
     %% create random vector for each shape model
-    shapeRandomVariables = 0.75 * randn(settings.numSamplingPoints, numShapeModels);
+    shapeRandomVariables = settings.shapeRandomVariablesMultiplier * randn(settings.numEigenVectors, numShapeModels);
 
     %% create the shape models 
     shapeTemplates = cell(numShapeModels,1);
     weightKernels = zeros(numShapeModels, numObjectFrames);
     for i=1:numShapeModels
        shapeTemplates{i} = GenerateRandomShape(shapeModelStages(i), settings, shapeRandomVariables(:,i)); 
-       weightKernels(i,:) = normpdf(1:numObjectFrames, stageChanges(i), 1);
+       weightKernels(i,:) = normpdf(1:numObjectFrames, stageChanges(i), max(1, sum(stageSequence == shapeModelStages(i))));
     end
 
     %% create weighting function that is used to interpolate between shape models
@@ -116,25 +149,63 @@ for o=1:size(objects,1)
         currentStage = stageSequence(relativeFrameIndex);
 
         %% create current shape
-        currentShape = zeros(settings.numSamplingPoints,2);
+        currentShape = zeros(settings.numEigenVectors,1);
         for i=1:numShapeModels
-            currentShape = currentShape + weightKernels(i,relativeFrameIndex) * shapeTemplates{i};
+            currentShape = currentShape + weightKernels(i,relativeFrameIndex) * shapeTemplates{i}(:);
 
             %% create the random shape as a linear combination of the eigenvectors and the mean shape
-            for j=1:settings.numSamplingPoints
+            for j=1:settings.numEigenVectors
                 currentShape = currentShape + weightKernels(i,relativeFrameIndex) * settings.randomizationWithinStageWeight * randn * settings.shapeModel.eigenVectors{shapeModelStages(i)}(:,j) * sqrt(settings.shapeModel.eigenValues{shapeModelStages(i)}(j,j));
             end
-
         end
 
-        %% create the mask image            
+        %% convert current linearized version of the shape back to a mask
+        currentShape = reshape(currentShape, [settings.numSamplingPoints, 2]);
         maskImage = currentStage * poly2mask(currentShape(:,2) + settings.patchSize/2, currentShape(:,1) + settings.patchSize/2, settings.patchSize, settings.patchSize);
+        
+        %% create the mask image with a special generation step for early ana-phase
+        if (s == maxIndex && currentStage == settings.metaPhaseIndex)
+            
+            %% find properties of the mask for repulsive computations
+            regionProps = regionprops(maskImage>0, 'BoundingBox', 'Centroid', 'EquivDiameter', 'MinorAxisLength', 'MajorAxisLength', 'Orientation');
 
+            %% apply cell division orthogonal to the major axis
+            currentOrientation = deg2rad(regionProps(1).Orientation + 90);
+            directionVector = [cos(currentOrientation), sin(currentOrientation)];
+            
+            maskImage = max(imtranslate(maskImage, 0.2 * regionProps(1).MinorAxisLength * directionVector, 'nearest'), imtranslate(maskImage, -0.2 * regionProps(1).MinorAxisLength * directionVector, 'nearest'));
+            maskImage(maskImage > 0) = settings.anaPhaseIndex;
+        end
+
+        %% create the current GAN-conditioning image
+        currentIntensity = max(0, min(255, round(settings.meanIntensities(currentStage) + objects(o,s).intensityStdDev)));
+        outputImage = cat(3, maskImage, double(maskImage > 0) * currentIntensity, 255 * rand(96,96));
+        
+        %% write the GAN conditioning image of the current cell to the temporary folder        
+        outputFileNameTempLabel = sprintf('%s%04d.png', settings.outputFolderTempLabel, currentOutIndex);        
+        imwrite(uint8(outputImage), outputFileNameTempLabel);
+        
+        %% perform GAN-based image synthesis
+        outputFileNameTempRaw = sprintf('%s%04d.png', settings.outputFolderTempRaw, currentOutIndex);
+        if (isfile(outputFileNameTempRaw))
+            rawImage = imread(outputFileNameTempRaw);
+            objects(o,s).rawImage = rawImage;
+        end
+
+        %% set the current shape
         objects(o,s).maskImage = maskImage;
         objects(o,s).currentShape = currentShape;
+        
+        %% increment 
+        currentOutIndex = currentOutIndex+1;        
     end
 
     disp(['Finished creating shapes for ' num2str(o) ' / ' num2str(size(objects,1)) ' objects ...']);
+end
+
+%% stop processing here as no raw images exist yet
+if (settings.saveResultImages == false)
+    return;
 end
 
 %% sample some random starting positions
@@ -163,6 +234,9 @@ for t=1:settings.numFrames
 
     %% initialize the current result image        
     resultImage = zeros(settings.imageSize);
+    resultImageStates = zeros(settings.imageSize);
+    resultImageIntensity = zeros(settings.imageSize);
+    resultImageRaw = uint8(2*ones(settings.imageSize));
 
     %% add all objects currently present to the result frame
     for o=1:size(objects,1)
@@ -186,6 +260,10 @@ for t=1:settings.numFrames
         %% get the current mask image and rotate it randomly
         maskImage = objects(o,t).maskImage;
         maskImage = imrotate(maskImage, objects(o,t).rotation);
+        
+        if (~isempty(objects(i,1).rawImage))
+            rawImage = imrotate(objects(o,t).rawImage, objects(o,t).rotation, 'bilinear');
+        end
 
         %% find properties of the mask for repulsive computations
         regionProps = regionprops(maskImage>0, 'BoundingBox', 'Centroid', 'EquivDiameter', 'MinorAxisLength', 'MajorAxisLength', 'Orientation');
@@ -198,8 +276,8 @@ for t=1:settings.numFrames
             directionVector = [cos(currentOrientation), sin(currentOrientation)];
 
             %% split objects
-            objects(o,t).position = objects(o,t).position + (-1)^(mod(o,2)) * 0.4 * regionProps(1).MinorAxisLength * directionVector;
-        end            
+            objects(o,t).position = objects(o,t).position + (-1)^(mod(o,2)) * settings.anaPhaseDisplacementMultiplier * regionProps(1).MinorAxisLength * directionVector;
+        end
 
         %% compute repulsive forces based on the axes lengths
         Rm = regionProps(1).MajorAxisLength * 5;
@@ -239,7 +317,7 @@ for t=1:settings.numFrames
         end
 
         %% update the object position respecting the image boundaries and border padding
-        objects(o,t).position = max(settings.borderPadding, min(round(objects(o,t).position + repulsiveForce + 2*randn(1,2)), settings.imageSize(1)-settings.borderPadding));
+        objects(o,t).position = max(settings.borderPadding, min(round(objects(o,t).position + repulsiveForce + settings.randomMotionMultiplier*randn(1,2)), settings.imageSize(1)-settings.borderPadding));
 
         %% compute ranges of the input patch that correspond to the global result image coordinates
         rangeX = max(1, min(round(regionProps(1).BoundingBox(2)):(regionProps(1).BoundingBox(2)+regionProps(1).BoundingBox(4)), size(maskImage,1)));
@@ -249,13 +327,58 @@ for t=1:settings.numFrames
 
         %% add the current mask to the result image           
         resultImage(rangeXGlobal, rangeYGlobal) = max(resultImage(rangeXGlobal, rangeYGlobal), o * (maskImage(rangeX, rangeY) > 0));
+        
+        
+        currentStage = objects(o,t).stages(end);
+        currentIntensity = round(settings.meanIntensities(currentStage) + objects(o,t).intensityStdDev);
+                
+        resultImageIntensity(rangeXGlobal, rangeYGlobal) = max(resultImageIntensity(rangeXGlobal, rangeYGlobal), currentIntensity * (maskImage(rangeX, rangeY) > 0));
+        resultImageStates(rangeXGlobal, rangeYGlobal) = max(resultImageStates(rangeXGlobal, rangeYGlobal), currentStage * (maskImage(rangeX, rangeY) > 0));
+        
+        if (~isempty(objects(o,t).rawImage))
+            resultImageRaw(rangeXGlobal, rangeYGlobal) = max(resultImageRaw(rangeXGlobal, rangeYGlobal), rawImage(rangeX, rangeY));
+        end
     end
-
-    %% plot final result images if enabled
-    %if (settings.debugFigures == true)
-        figure(2);
-        imagesc(max(resultImage, max(resultImage(:))*(imgradient(resultImage) > 0)));
-        axis equal;
-        pause(0.5);
-   % end
+    
+    %% apply post processing to the generated raw image
+    resultImageRaw = PerformPostProcessing(resultImageRaw, settings);
+            
+    %% write the final result images
+    imwrite(uint8(resultImage), sprintf('%s/man_track%03d.png', settings.outputFolderLabel, t));
+    imwrite(resultImageRaw, sprintf('%s/t%03d.png', settings.outputFolderRaw, t));
+    
+    disp(['Finished writing result images ' num2str(t) ' / ' num2str(settings.numFrames)]);
 end
+
+%% create the tracking information
+fileId = fopen([settings.outputFolderLabel 'man_track.txt'], 'wb');
+trackingResult = [];
+for o=1:size(objects,1)
+
+    %% find the temporal extent of the current object
+    minIndex = inf;
+    maxIndex = 0;
+    for t=1:settings.numFrames
+        if (isempty(objects(o,t).id))
+            continue;
+        end
+
+        if (t < minIndex)
+            minIndex = t;
+        end
+        if (t >= maxIndex)
+            maxIndex = t;
+        end
+    end
+    
+    fprintf(fileId, '%i %i %i %i\n', o, minIndex-1, maxIndex-1, max(0, objects(o,minIndex).predecessor));
+end
+
+%% close the file id
+fclose(fileId);
+
+disp('------');
+disp(['Generated raw image data set written to: ' settings.outputFolderRaw]);
+disp(['Generated label image data set written to: ' settings.outputFolderLabel]);
+disp(['Tracking information in CTC format written to : ' settings.outputFolderLabel '/man_track.txt']);
+
