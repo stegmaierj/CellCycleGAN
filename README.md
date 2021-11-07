@@ -31,7 +31,7 @@ Spatiotemporal Microscopy Image Synthesis of Cell Populations using Statistical 
 If you find this work useful, please cite the following publication: 
 
 D. Bähr, D. Eschweiler, A. Bhattacharyya, D. Moreno-Andrés, W. Antonin, J. Stegmaier, 
-"CellCycleGAN: Spatiotemporal Microscopy Image Synthesis of Cell Populations using Statistical Shape Models and Conditional GANs", *arxiv*, 2020.
+"CellCycleGAN: Spatiotemporal Microscopy Image Synthesis of Cell Populations using Statistical Shape Models and Conditional GANs", *IEEE International Symposium on Biomedical Imaging (ISBI)*, 2021.
 
 
 
